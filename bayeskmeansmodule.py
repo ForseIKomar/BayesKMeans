@@ -45,73 +45,124 @@ import time
 import warnings
 warnings.filterwarnings('ignore')
 
-"""#Класс Silhouette"""
-
 class Silhouette(object):
- 
-    def __init__(self, data, n_init_points = 5, initial_generator = 'sobol', 
-                 acq_function = 'LCB', kappa = 2, noise = 'gaussian', 
-                 left_border = 2, right_border = 100, n_calls = 11, 
-                 dispersion = 2, random_state = 2022):
+    def __init__(self, data, random_state = 2022):
         self.data = data
-        self.n_init_points = n_init_points
-        self.initial_generator = initial_generator
-        self.acq_function = acq_function
-        self.kappa = kappa
-        self.noise = noise
-        self.left_border = left_border
-        self.right_border = right_border
-        self.n_calls = n_calls
-        self.dispersion = dispersion
         self.random_state = random_state
+        self.function = self.score_function
 
-    def score_function(self, n):
-      clusterer = KMeans(n_clusters = n[0], random_state = self.random_state)
-      preds = clusterer.fit_predict(np.array(self.data))
+    def score_function(self, n, predicts = None):
+      if predicts is not None:
+        preds = predicts
+      else:
+        clusterer = KMeans(n_clusters = n[0], random_state = self.random_state)
+        preds = clusterer.fit_predict(np.array(self.data))
       return 1 - silhouette_score(self.data, preds)
 
-"""# Класс Davies Bouldin"""
+
 
 class DaviesBouldin(object):
- 
-    def __init__(self, data, n_init_points = 6, initial_generator = 'sobol', 
-                 acq_function = 'LCB', kappa = 3, noise = 'gaussian', 
-                 left_border = 2, right_border = 100, n_calls = 14, 
-                 dispersion = 2, kMeansRandomState = 2022):
+    def __init__(self, data, random_state = 2022):
         self.data = data
-        self.n_init_points = n_init_points
-        self.initial_generator = initial_generator
-        self.acq_function = acq_function
-        self.kappa = kappa
-        self.noise = noise
-        self.left_border = left_border
-        self.right_border = right_border
-        self.n_calls = n_calls
-        self.dispersion = dispersion
         self.random_state = random_state
+        self.function = self.score_function
 
-    def score_function(self, n):
-      clusterer = KMeans(n_clusters = n[0], random_state = self.random_state)
-      preds = clusterer.fit_predict(np.array(self.data))
+    def score_function(self, n, predicts = None):
+      if predicts is not None:
+        preds = predicts
+      else:
+        clusterer = KMeans(n_clusters = n[0], random_state = self.random_state)
+        preds = clusterer.fit_predict(np.array(self.data))
       return davies_bouldin_score(self.data, preds)
 
-"""#Класс BayesKMeans"""
+
 
 class BayesKMeans(object):
- 
     def __init__(self, data):
         self.data = data
-        self.silhouette = Silhouette(data)
-        self.daviesBouldin = DaviesBouldin(data)
+
+        # Определение переменных на будущее
         self.x_iters = None
         self.func_vals = None
         self.foundK = None
+        self.border = None
+        
+        # Определение параметров байесовской оптимизации 2-50, 99%
+        self.left_border = 2
+        self.right_border = 50
+        self.initial_point_generator = 'hammersly'
+        self.n_init_points = 4
+        self.acq_optimizer = 'lbfgs'
+        self.acq_func = 'gp_hedge'
+        self.xi = 0.01
+        self.kappa = 5
+        self.n_restarts_optimizer = 1
+        self.noise = 'gaussian'
+        self.dispersion = 7
+        self.n_calls = 6
+        self.x_0 = []
+        self.y_0 = []
+        self.elbow = []
+
+        # Определение метода
         if len(data) <= 4000:
           self.methodName = 'silhouette'
-          self.method = self.silhouette
+          self.method = Silhouette(data)
         else:
           self.methodName = 'daviesBouldin'
-          self.method = self.daviesBouldin
+          self.method = DaviesBouldin(data)
+
+    def __get_elbow(self, n_clusters):
+        if n_clusters not in self.x_0:
+          model = KMeans(n_clusters=n_clusters)
+          predicts = model.fit_predict(self.data)
+          self.x_0.append(n_clusters)
+          self.y_0.append(self.method.score_function([n_clusters], predicts))
+          self.elbow.append(model.inertia_)
+          return model.inertia_
+        else:
+          i = 0
+          while self.x_0[i] != n_clusters:
+            i += 1
+          return self.elbow[i]
+
+    def determineRightBorder(self):
+      step = 50
+      diff = 20
+      level = 0.75
+      j = 1
+      k_0 = self.__get_elbow((j) * step)
+      k_1 = self.__get_elbow((j) * step + diff)
+      while (k_1 / k_0 < level):
+        j += 1
+        k_0 = self.__get_elbow((j) * step)
+        k_1 = self.__get_elbow((j) * step + diff)
+      self.border = j
+      self.right_border = (j) * 50
+      print('Right border is {0}'.format(self.right_border))
+
+    def setBayesianParametrs(self, persent = '99'):
+      if persent == '95':
+        self.initial_point_generator = 'hammersly'
+        self.n_init_points = max(4 - self.border, 2)
+        self.acq_optimizer = 'lbfgs'
+        self.acq_func = 'gp_hedge'
+        self.n_restart_optimizer = 1
+        self.noise = 'gaussian'
+        self.dispersion = 4 + (self.border // 2) * 2
+        self.n_calls = 4 + self.border * 2 - 3 * int((self.right_border - 50) / 100)
+
+      elif persent == '99':
+        self.initial_point_generator = 'hammersly'
+        self.n_init_points = max(4 - self.border, 2)
+        self.acq_optimizer = 'lbfgs'
+        self.acq_func = 'gp_hedge'
+        self.n_restart_optimizer = 1
+        self.noise = 'gaussian'
+        self.dispersion = 7 + (self.border // 2) * 2
+        self.n_calls = 4 + self.border * 2 - 3 * int((self.right_border - 50) / 100)
+      else:
+        print('Persent value can be "95" or "99"')
 
     def findK(self):
       self.__bayesian_optimization()
@@ -119,53 +170,40 @@ class BayesKMeans(object):
     def getK(self):
       return self.foundK
 
-    def showData(self):
-      plt.scatter(self.data[:, 0], self.data[:, 1])
-      plt.show()
+    def chooseOptimizationMethod(self, optimized_method):
+      self.x_0 = []
+      self.y_0 = []
+      self.elbow = []
+      if optimized_method == 'silhouette':
+          self.method = Silhouette(data)
+      elif optimized_method == 'daviesBouldin':
+          self.method = DaviesBouldin(data)
 
-    def showColoredData(self):
-      clusterer = KMeans(n_clusters = self.foundK, random_state = self.method.kMeansRandomState)
-      preds = clusterer.fit_predict(np.array(self.data))
-      plt.scatter(self.data[:, 0], self.data[:, 1], c=preds)
-      plt.show()  
-
-    def showBayesianPlot(self, line = False):
-      d = {}
-      for i in range(len(self.x_iters)):
-        d[self.x_iters[i]] = self.func_vals[i]
-      x_asc = sorted(self.x_iters)
-      y_asc = []
-      for x in x_asc:
-        y_asc.append(d[x])
-      if line:
-        plt.plot(x_asc, y_asc, label=self.methodName)
-
-      plt.scatter(x_asc, y_asc, label=self.methodName, marker='x')
-      plt.scatter(self.foundK, d[self.foundK], c='red', marker='+', s=10, label='Target = ' + str(self.foundK))
-      plt.xlabel('n_clusters')  
-      plt.ylabel('Score')
-      plt.legend()
-      plt.show()
-
-    def chooseFunction(self, optimizedFunction):
-      if optimizedFunction == 'silhouette':
-          self.method = self.silhouette
-      elif optimizedFunction == 'daviesBouldin':
-          self.method = self.daviesBouldin
-
-
+    def setOptimizationMethod(self, method):
+      self.x_0 = []
+      self.y_0 = []
+      self.elbow = []
+      self.method = method
 
     def __bayesian_optimization(self):
+      x0 = self.x_0[:-1]
+      y0 = self.y_0[:-1]
+      for i in range(len(x0)):
+        x0[i] = [x0[i]]
       result = gp_minimize(
                   self.method.score_function,
-                  [[self.method.left_border, self.method.right_border]],
-                  acq_func = self.method.acq_function,
-                  n_calls = self.method.n_calls,   
-                  n_initial_points = self.method.n_init_points,
-                  initial_point_generator = self.method.initial_generator,
-                  kappa = self.method.kappa,
-                  n_points = self.method.right_border - self.method.left_border + 1,   # Так как поиск происходит только по целым значениям, имеет смысл ограничить число точек
-                  noise = self.method.noise
+                  [[self.left_border, self.right_border]],
+                  acq_func = self.acq_func,
+                  n_calls = self.n_calls,   
+                  n_initial_points = self.n_init_points,
+                  initial_point_generator = self.initial_point_generator,
+                  acq_optimizer = self.acq_optimizer,
+                  n_restarts_optimizer = self.n_restarts_optimizer,
+                  kappa = self.kappa,
+                  xi = self.xi,
+                  x0 = x0,
+                  y0 = y0,
+                  noise = self.noise
                            )
       x_it = []
       for x in result.x_iters:
@@ -173,15 +211,45 @@ class BayesKMeans(object):
       self.x_iters = x_it
       self.func_vals = result.func_vals
       self.foundK = result.x[0]
-      min_function_value = result.fun
+      self.min_function_value = result.fun
 
-      for d in range(max(self.foundK - self.method.dispersion, 2), self.foundK + self.method.dispersion + 1):
+      for d in range(max([self.foundK - self.dispersion, 2]), self.foundK + self.dispersion + 1):
         if d not in self.x_iters:
           self.x_iters.append(d)
           self.func_vals = np.append(self.func_vals, self.method.score_function([d]))
-          if self.func_vals[-1] < min_function_value:
-            min_function_value = self.func_vals[-1]
+          if self.func_vals[-1] < self.min_function_value:
+            self.min_function_value = self.func_vals[-1]
             self.foundK = d
+
+    def showData(self):
+      plt.scatter(self.data[:, 0], self.data[:, 1])
+      plt.show()
+
+    def showColoredData(self):
+      clusterer = KMeans(n_clusters = self.foundK, random_state = self.method.random_state)
+      preds = clusterer.fit_predict(np.array(self.data))
+      plt.scatter(self.data[:, 0], self.data[:, 1], c=preds)
+      plt.show()  
+
+    def showBayesianPlot(self, line = True):
+      d = {}
+      for i in range(len(self.x_iters)):
+        d[self.x_iters[i]] = self.func_vals[i]
+
+      x_asc = sorted(self.x_iters)
+      y_asc = []
+      for x in x_asc:
+        y_asc.append(d[x])
+
+      if line:
+        plt.plot(x_asc, y_asc, label=self.methodName)
+
+      plt.scatter(x_asc, y_asc, label=self.methodName + ' points', marker='x', s=15, c='green')
+      plt.scatter(self.foundK, d[self.foundK], c='red', marker='+', s=35, label='Target = ' + str(self.foundK))
+      plt.xlabel('n_clusters')  
+      plt.ylabel('Score')
+      plt.legend()
+      plt.show()
 
 """# Тестирование"""
 
@@ -189,22 +257,15 @@ data = make_blobs(n_samples=5000, n_features=2, centers=32, cluster_std=3, cente
 data = data[0]
 
 bayesKMeans = BayesKMeans(data)
-
 bayesKMeans.showData()
 
-bayesKMeans.chooseFunction('silhouette')
-
 start = time.time()
+bayesKMeans.determineRightBorder()
+bayesKMeans.setBayesianParametrs(persent = '99')
 bayesKMeans.findK()
 print(time.time() - start)
 
 bayesKMeans.getK()
-
-
-
-
-
-
 
 bayesKMeans.showColoredData()
 
