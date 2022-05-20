@@ -1,5 +1,11 @@
+Installing package with:
+```
 pip install bayesKMeans==0.2.0
+```
 
+
+Example of work:
+```
 from bayeskmeans.bayes_kmeans import BayesKMeans
 from bayeskmeans.bayes_visualize import BayesKMeansVisualize
 from sklearn.datasets import make_blobs
@@ -15,3 +21,5 @@ print(bayesKMeans.found_k)
 
 visual = BayesKMeansVisualize(bayesKMeans)
 visual.show_bayesian_plot()
+
+```
