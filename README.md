@@ -5,10 +5,7 @@
 Итоговая библиотека позволяет найти оптимальное количество кластеров.
 
 Пример получения числа кластеров:
-```
-    data = make_blobs(n_samples=5000, n_features=2, centers=127, cluster_std=4, center_box=(-300, 300))
-    data = data[0]
-
+```python
 from bayeskmeans.bayes_kmeans import BayesKMeans
     bayesKMeans = BayesKMeans(data)
     bayesKMeans.findK()
@@ -16,9 +13,10 @@ from bayeskmeans.bayes_kmeans import BayesKMeans
 ```
 
 Пример визуализации:
-```
+```python
 from bayeskmeans.bayes_visualize import BayesKMeansVisualize
     visual = BayesKMeansVisualize(bayesKMeans)
     visual.showBayesianPlot()
 ```
 
+https://pypi.org/project/bayesKMeans/
